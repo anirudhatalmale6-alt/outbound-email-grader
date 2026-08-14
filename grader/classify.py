@@ -64,7 +64,17 @@ def classify(email: Email, cfg: Config) -> Verdict:
             return Verdict(False, "internal only")
         return Verdict(False, "excluded or automated recipient")
 
-    if cfg.grade_first_contact_only and email.is_reply:
+    # Once the prospect has written back this is a conversation, not outreach.
+    # Grading it against a cold-email standard measures nothing.
+    if email.prospect_replied and not cfg.grade_after_reply:
+        return Verdict(False, "prospect replied - a conversation, not outreach")
+
+    if email.is_follow_up:
+        if not cfg.grade_follow_ups:
+            return Verdict(False, "follow-up, not a first contact")
+        if email.touch > cfg.max_touch:
+            return Verdict(False, f"touch {email.touch} - past the sequence we grade")
+    elif cfg.grade_first_contact_only and email.is_reply:
         return Verdict(False, "reply, not a first contact")
 
     if len(email.body.strip()) < cfg.min_body_chars:

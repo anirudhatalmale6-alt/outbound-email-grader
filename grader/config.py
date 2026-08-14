@@ -43,6 +43,13 @@ class Config:
     delegated_admin: str = ""          # an admin address in the domain
     domain: str = ""                   # e.g. dncsearch.com
 
+    # "archive" reads one mailbox that every producer BCCs. "per_mailbox"
+    # opens each producer's own Sent folder. Archive is the better default:
+    # one account to authorise instead of the whole domain, and it is a copy,
+    # so nothing here can touch anybody's real mail.
+    mode: str = "archive"
+    archive_mailbox: str = ""
+
     # --- Anthropic ---
     anthropic_api_key: str = ""
     model: str = "claude-opus-5"
@@ -52,7 +59,14 @@ class Config:
     producers: list[Producer] = field(default_factory=list)
 
     # --- What counts as a gradeable email ---
-    grade_first_contact_only: bool = True
+    grade_first_contact_only: bool = False
+    # Follow-ups chasing a prospect who has not replied. Graded, but the
+    # grader is told which touch it is so it judges a follow-up as a follow-up.
+    grade_follow_ups: bool = True
+    max_touch: int = 4
+    # Once the prospect has written back it is a conversation, not outreach,
+    # and grading it against a cold-email standard is meaningless.
+    grade_after_reply: bool = False
     internal_domains: list[str] = field(default_factory=list)
     exclude_recipients: list[str] = field(default_factory=list)
     min_body_chars: int = 40
@@ -69,6 +83,8 @@ class Config:
     # --- Housekeeping ---
     lookback_days: int = 1
     max_emails_per_producer: int = 200
+    max_threads: int = 1000
+    quiet_producer_warning: bool = True
     database: Path = APP_DIR / "grader.sqlite3"
     rubric_file: Path = APP_DIR / "rubric.md"
 
@@ -117,6 +133,8 @@ def load(path: Path | None = None, strict: bool = True) -> Config:
         cfg.service_account_file = candidate if candidate.is_absolute() else APP_DIR / candidate
     cfg.delegated_admin = str(google.get("delegated_admin", "")).strip()
     cfg.domain = str(google.get("domain", "")).strip()
+    cfg.mode = str(google.get("mode", cfg.mode)).strip().lower() or cfg.mode
+    cfg.archive_mailbox = str(google.get("archive_mailbox", "")).strip().lower()
 
     anthropic = raw.get("anthropic", {}) or {}
     # The key may come from the environment so it never has to sit in a file
@@ -148,6 +166,11 @@ def load(path: Path | None = None, strict: bool = True) -> Config:
     cfg.grade_first_contact_only = bool(
         scope.get("first_contact_only", cfg.grade_first_contact_only)
     )
+    cfg.grade_follow_ups = bool(scope.get("follow_ups", cfg.grade_follow_ups))
+    cfg.max_touch = int(scope.get("max_touch", cfg.max_touch))
+    cfg.grade_after_reply = bool(
+        scope.get("grade_after_reply", cfg.grade_after_reply)
+    )
     cfg.internal_domains = _as_list(scope.get("internal_domains"))
     cfg.exclude_recipients = [
         r.lower() for r in _as_list(scope.get("exclude_recipients"))
@@ -169,6 +192,10 @@ def load(path: Path | None = None, strict: bool = True) -> Config:
     cfg.lookback_days = int(run.get("lookback_days", cfg.lookback_days))
     cfg.max_emails_per_producer = int(
         run.get("max_emails_per_producer", cfg.max_emails_per_producer)
+    )
+    cfg.max_threads = int(run.get("max_threads", cfg.max_threads))
+    cfg.quiet_producer_warning = bool(
+        run.get("quiet_producer_warning", cfg.quiet_producer_warning)
     )
     db = str(run.get("database", "")).strip()
     if db:
@@ -193,6 +220,10 @@ def _validate(cfg: Config) -> None:
         )
     if not cfg.delegated_admin:
         problems.append("google.delegated_admin is not set")
+    if cfg.mode not in ("archive", "per_mailbox"):
+        problems.append(f"google.mode must be archive or per_mailbox, not {cfg.mode!r}")
+    if cfg.mode == "archive" and not cfg.archive_mailbox:
+        problems.append("google.archive_mailbox is not set (needed in archive mode)")
     if not cfg.anthropic_api_key:
         problems.append("anthropic.api_key is not set (or ANTHROPIC_API_KEY)")
     if not cfg.active_producers:

@@ -8,8 +8,8 @@ from grader.checks import Email
 from grader.grade import Issue, Judgement
 from grader.score import ProducerSummary, Result
 
-def mk(subject, body, score, summary, well, issues):
-    e = Email(message_id=subject[:10], to=["dana@acmemedia.com"], subject=subject, body_text=body)
+def mk(subject, body, score, summary, well, issues, touch=1, to="dana@acmemedia.com"):
+    e = Email(message_id=subject[:10]+str(touch), to=[to], subject=subject, body_text=body, touch=touch)
     return Result(email=e, findings=checks.run_all(e),
                   judgement=Judgement(score=score, summary=summary, did_well=well,
                                       issues=[Issue(*i) for i in issues],
@@ -47,7 +47,17 @@ joe.results = [
         ("The ask", "\"let me know if you would like to learn more\" puts the work on him.",
          "Ask a specific yes/no question: are you free Thursday afternoon?", "medium")]),
 ]
-joe.skipped = {"reply, not a first contact": 14, "internal only": 6}
+joe.results.append(
+    mk("Re: Question about Acme Media's Q3 slate",
+       "Hi Dana,\n\nOne more thing that might land better than what I sent: the "
+       "affiliate handover is the piece that usually slips, and I can send you "
+       "the two-page checklist we use for it. Worth me sending?" + SIG,
+       81, "A proper follow-up - shorter, new angle, does not repeat the first email.",
+       ["Gives a new reason to reply rather than just bumping the thread.",
+        "Shorter than the first email, as a follow-up should be."],
+       [], touch=2))
+joe.skipped = {"prospect replied - a conversation, not outreach": 9,
+               "internal only": 6, "touch 5 - past the sequence we grade": 2}
 
 maria = ProducerSummary(email="maria@allaccessptv.com", name="Maria Lopez")
 maria.results = [
@@ -68,16 +78,28 @@ maria.results = [
        [("The offer", "There is no reason given for the call at all.",
          "One sentence on why it is worth her time.", "high")]),
 ]
+maria.results.append(
+    mk("Re: ACT NOW - LIMITED TIME OFFER!!!",
+       "Hi again,\n\nJust bumping this up. Did you see my last email? Let me know.",
+       35, "Bumping a thread is not a reason to reply.",
+       [],
+       [("Follow-ups", "\"Just bumping this up\" gives Priya nothing new to react to.",
+         "Lead with something she has not seen yet - a result, a name, a question.", "high")],
+       touch=2, to="priya@northstar.com"))
 maria.skipped = {"internal only": 3}
 
 sam = ProducerSummary(email="sam@allaccessptv.com", name="Sam Okafor")
 
 summaries = [joe, maria, sam]
+COVERAGE = ["Nothing from Sam Okafor (sam@allaccessptv.com) in the last 1 day(s). "
+            "Either they sent no cold email, or their mail is not reaching "
+            "cortex@allaccessptv.com - worth checking the BCC rule before "
+            "reading anything into the score."]
 out = pathlib.Path("reports"); out.mkdir(exist_ok=True)
 (out / "sample-manager.html").write_text(
     report.manager_html(summaries, date(2026, 8, 14),
                         {"joe@allaccessptv.com": 62, "maria@allaccessptv.com": 34},
-                        [], shadow=True), encoding="utf-8")
+                        COVERAGE, shadow=True), encoding="utf-8")
 (out / "sample-producer.html").write_text(
     report.producer_html(maria, date(2026, 8, 14), previous=34), encoding="utf-8")
 print("manager:", joe.average, maria.average)

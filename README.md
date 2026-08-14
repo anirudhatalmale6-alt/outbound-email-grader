@@ -35,13 +35,14 @@ grades, and decide whether you agree with them first. An automated email telling
 somebody they scored 54 is very hard to take back, and the first version of any
 grader is wrong about something.
 
-**It grades first contacts, not everything.** You said "every single outgoing
-email". Taken literally that means grading a reply to a colleague against a
-cold-email standard, which produces a terrible score for an email that was never
-trying to be a cold email — and within a week nobody reads the report. So the
-grader scores first-contact emails to people outside the company. Everything
-else is counted and shown in the report, but not scored. If you want that
-changed, `first_contact_only: false` in config.yaml.
+**It grades cold outreach — first contacts and the follow-ups chasing them —
+and judges each as what it is.** A follow-up is expected to be shorter, to skip
+re-introducing the company, and to give a new reason to reply; graded against
+the first-contact standard it would lose marks for doing exactly the right
+thing, so the grader is told which touch it is reading. Once a prospect replies,
+that thread stops being graded: it is a conversation, and a cold-email standard
+measures nothing useful about it. Internal mail and automated messages are
+counted and shown, never scored.
 
 **Your standard is the only standard.** Everything is graded against `rubric.md`
 — your document, not the model's opinion of good cold email. If a rule is not in
@@ -49,6 +50,28 @@ that file, nobody is marked down for breaking it. The more specific each line,
 the more consistent the grades: "be personalised" grades erratically, "the first
 sentence must refer to something specific about the recipient's company" grades
 the same way every time.
+
+---
+
+## Where it reads from
+
+Two modes. **Archive** (the default) reads one mailbox that every producer BCCs.
+**Per-mailbox** opens each producer's own Sent folder.
+
+Archive is better on every axis: one account to authorise instead of the whole
+domain, it is a copy so nothing here can touch anybody's real mail, and — the
+part that actually changes the output — the whole thread is visible, so a
+follow-up can be told apart from a first contact and from a genuine reply.
+
+It brings one failure mode a Sent folder does not have. If a producer's BCC rule
+was never set up, "no emails from Maria" and "Maria sent nothing" look identical
+in the data, and only one of those is Maria's fault. So the report says out loud
+when a producer's mail never arrived, rather than quietly showing them a zero.
+`check.py` samples the archive and prints who it can actually see.
+
+**Check the archive address character by character.** A wrong one does not
+raise an error anywhere — it reads an empty mailbox and reports nothing, every
+day, forever. `check.py` warns if its domain does not match the producers'.
 
 ---
 
@@ -122,6 +145,11 @@ you can always tell a setup problem from a code problem.
 
 ## Tested
 
+- 24 checks on the archive logic — touch numbering out of date order, two
+  producers working one account without inflating each other, one producer
+  writing to two people without the second looking like a follow-up, and
+  detecting when the prospect wrote back. Three deliberate mutations of that
+  logic were confirmed to fail the suite, so the tests are not decorative.
 - 87 checks on the rule engine, most of them on false positives: acronyms are not
   shouting, a real `Re:` is not a fake one, one exclamation mark is fine, a logo
   in a signature is not an image-only email, and every opt-out wording the tool
@@ -136,4 +164,5 @@ you can always tell a setup problem from a code problem.
 ```
 python3 tests/test_checks.py
 python3 tests/test_pipeline.py
+python3 tests/test_archive.py
 ```

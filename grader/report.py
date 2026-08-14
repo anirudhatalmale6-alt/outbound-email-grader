@@ -71,6 +71,9 @@ def manager_html(
     total_graded = sum(s.graded_count for s in summaries)
     total_skipped = sum(s.skipped_count for s in summaries)
     compliance_total = sum(s.compliance_count for s in summaries)
+    total_follow_ups = sum(
+        1 for s in summaries for r in s.results if r.email.is_follow_up
+    )
 
     rows = []
     for s in ranked:
@@ -79,7 +82,7 @@ def manager_html(
                 f'<tr><td style="padding:8px 10px;border-bottom:1px solid #eee">'
                 f"{_e(s.name or s.email)}</td>"
                 f'<td colspan="4" style="padding:8px 10px;border-bottom:1px solid #eee;{MUTED}">'
-                f"no first-contact emails today</td></tr>"
+                f"no outreach emails today</td></tr>"
             )
             continue
         rows.append(
@@ -163,8 +166,8 @@ def manager_html(
 
 <div style="{CARD}">
 <span style="font-size:15px">
-<strong>{total_graded}</strong> first-contact emails graded across
-<strong>{len(summaries)}</strong> producers.
+<strong>{total_graded}</strong> outreach emails graded across
+<strong>{len(summaries)}</strong> producers{f' ({total_follow_ups} of them follow-ups)' if total_follow_ups else ''}.
 {f'<strong style="color:#b42318">{compliance_total}</strong> had a compliance problem.' if compliance_total else 'No compliance problems.'}
 </span><br>
 <span style="{MUTED}">{total_skipped} other messages were not graded (replies and
@@ -193,9 +196,10 @@ standard.</div>
 {error_note}
 
 <div style="{MUTED};margin-top:26px;border-top:1px solid #eee;padding-top:10px">
-Only first-contact emails to people outside the company are scored. Replies,
-internal mail and automated messages are counted but not graded, because they
-were never meant to meet a cold-email standard.
+Cold outreach to people outside the company is scored -- first contacts and the
+follow-ups chasing them, each judged as what it is. Once a prospect replies the
+thread becomes a conversation and is no longer graded, along with internal mail
+and automated messages. Those are counted, not scored.
 </div>
 </div>"""
 
@@ -207,7 +211,7 @@ def manager_text(summaries: list[ProducerSummary], when: date, shadow: bool) -> 
         lines += ["SHADOW MODE: producers have not been emailed.", ""]
     for s in ranked:
         if not s.graded_count:
-            lines.append(f"  {s.name or s.email}: no first-contact emails today")
+            lines.append(f"  {s.name or s.email}: no outreach emails today")
             continue
         lines.append(
             f"  {s.name or s.email}: {s.average} ({s.grade}) over "
@@ -216,7 +220,8 @@ def manager_text(summaries: list[ProducerSummary], when: date, shadow: bool) -> 
         )
         if s.compliance_count:
             lines.append(f"      {s.compliance_count} with a compliance problem")
-    lines += ["", "Only first-contact external emails are scored."]
+    lines += ["", "Cold outreach only: first contacts and follow-ups chasing "
+              "them. Threads where the prospect replied are not graded."]
     return "\n".join(lines)
 
 
@@ -229,7 +234,10 @@ def _result_block(result: Result) -> str:
     parts = [
         f'<div style="{CARD}">'
         f'<div style="display:flex;justify-content:space-between;align-items:baseline">'
-        f'<strong style="font-size:15px">{_e(result.email.subject or "(no subject)")}</strong>'
+        f'<strong style="font-size:15px">{_e(result.email.subject or "(no subject)")}'
+        + (f'<span style="{MUTED};font-weight:400"> &middot; follow-up '
+           f'{result.email.touch - 1}</span>' if result.email.is_follow_up else "")
+        + "</strong>"
         f'<span style="color:{_colour(result.overall)};font-weight:700;font-size:17px">'
         f"{result.overall}</span></div>"
     ]
@@ -316,7 +324,7 @@ def producer_html(
             f"<h2>Your outbound email report</h2>"
             f'<div style="{MUTED}">{when:%A %d %B %Y}</div>'
             f"{greeting}"
-            f"<p>No first-contact emails to grade today.</p></div>"
+            f"<p>No outreach emails to grade today.</p></div>"
         )
 
     worst_first = sorted(summary.results, key=lambda r: r.overall)
@@ -351,7 +359,7 @@ def producer_html(
 <div style="font-size:34px;font-weight:700;color:{_colour(summary.average)}">
 {summary.average}<span style="font-size:19px;color:#666"> / 100</span></div>
 <div>{_pill(summary.grade, _colour(summary.average))}{_arrow(summary.average, previous)}</div>
-<div style="{MUTED};margin-top:6px">across {summary.graded_count} first-contact
+<div style="{MUTED};margin-top:6px">across {summary.graded_count} outreach
 email{"s" if summary.graded_count != 1 else ""}</div>
 </div>
 
@@ -359,15 +367,16 @@ email{"s" if summary.graded_count != 1 else ""}</div>
 
 <h3 style="margin:22px 0 6px">Email by email</h3>
 <div style="{MUTED};margin-bottom:4px">Lowest scoring first, so the useful bit is
-at the top.</div>
+at the top. Follow-ups are marked.</div>
 {blocks}
 {more}
 
 <div style="{MUTED};margin-top:26px;border-top:1px solid #eee;padding-top:10px">
-Only first-contact emails to people outside the company are graded. Your replies
-and internal mail are not looked at. Scores come from two things: fixed technical
-rules (spam-filter risk, formatting, compliance) and a reading of the email
-against the company's written standard.
+Your cold outreach is graded -- first contacts and the follow-ups chasing them.
+A follow-up is judged as a follow-up, not against the first-contact standard.
+Once someone replies, that thread stops being graded. Internal mail is never
+looked at. Scores come from two things: fixed technical rules (spam-filter risk,
+formatting, compliance) and a reading of the email against the company standard.
 </div>
 </div>"""
 
@@ -376,13 +385,13 @@ def producer_text(summary: ProducerSummary, when: date) -> str:
     if not summary.results:
         return (
             f"Your outbound email report - {when:%d %B %Y}\n\n"
-            "No first-contact emails to grade today."
+            "No outreach emails to grade today."
         )
     lines = [
         f"Your outbound email report - {when:%d %B %Y}",
         "",
         f"Overall: {summary.average}/100 ({summary.grade}) across "
-        f"{summary.graded_count} first-contact emails.",
+        f"{summary.graded_count} outreach emails.",
         "",
     ]
     for result in sorted(summary.results, key=lambda r: r.overall)[:8]:
@@ -395,5 +404,6 @@ def producer_text(summary: ProducerSummary, when: date) -> str:
             lines.append(f"      - {issue.criterion}: {issue.problem}")
             lines.append(f"        Try: {issue.fix}")
         lines.append("")
-    lines.append("Only first-contact external emails are graded.")
+    lines.append("Cold outreach only: first contacts and the follow-ups "
+                 "chasing them.")
     return "\n".join(lines)

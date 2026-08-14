@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from grader import checks, classify, gmail, report, store
+from grader import archive, checks, classify, gmail, report, store
 from grader.config import Config, ConfigError, load
 from grader.grade import Grader, Judgement, load_rubric
 from grader.score import ProducerSummary, Result
@@ -46,6 +46,32 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _fetch_all(cfg: Config, since, producers, errors: list[str]):
+    """Returns {producer_email: [Email]}.
+
+    Archive mode is one read of one mailbox, then messages are attributed by
+    who sent them. Per-mailbox mode opens each producer's Sent folder in turn.
+    """
+    by_producer: dict[str, list] = {p.email.lower(): [] for p in producers}
+
+    if cfg.mode == "archive":
+        try:
+            for email in archive.fetch_archive(cfg, since):
+                by_producer.setdefault(email.sender, []).append(email)
+        except gmail.GmailError as exc:
+            errors.append(f"archive mailbox {cfg.archive_mailbox}: {exc}")
+        return by_producer
+
+    for producer in producers:
+        try:
+            by_producer[producer.email.lower()] = gmail.fetch_sent(
+                cfg, producer.email, since
+            )
+        except gmail.GmailError as exc:
+            errors.append(f"{producer.email}: {exc}")
+    return by_producer
+
+
 def collect(cfg: Config, args: argparse.Namespace, conn, grader: Grader | None):
     """Fetch, filter and grade. Returns (summaries, errors)."""
     since = datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)
@@ -58,14 +84,18 @@ def collect(cfg: Config, args: argparse.Namespace, conn, grader: Grader | None):
         if not producers:
             errors.append(f"No active producer matches {args.producer}")
 
+    by_producer = _fetch_all(cfg, since, producers, errors)
+
+    # An archive can be silently incomplete in a way a Sent folder cannot: a
+    # producer whose BCC rule was never set up looks exactly like a producer
+    # who sent nothing. Say so rather than showing them a zero.
+    if cfg.mode == "archive" and cfg.quiet_producer_warning:
+        seen = {addr for addr, mail in by_producer.items() if mail}
+        errors.extend(archive.coverage_warnings(cfg, seen, cfg.lookback_days))
+
     for producer in producers:
         summary = ProducerSummary(email=producer.email, name=producer.name)
-        try:
-            fetched = gmail.fetch_sent(cfg, producer.email, since)
-        except gmail.GmailError as exc:
-            errors.append(f"{producer.email}: {exc}")
-            summaries.append(summary)
-            continue
+        fetched = by_producer.get(producer.email.lower(), [])
 
         gradeable, skipped = classify.split(fetched, cfg)
         summary.skipped = skipped

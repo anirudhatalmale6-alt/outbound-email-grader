@@ -143,7 +143,23 @@ def _render(email: Email) -> str:
     # is what the standard mostly concerns anyway.
     if len(body) > 8000:
         body = body[:8000] + "\n[... truncated for grading ...]"
+
+    # Telling the model where in the sequence this sits matters more than it
+    # looks. A follow-up judged as a first contact loses marks for not
+    # introducing the company, which is exactly what a follow-up should not do.
+    if email.touch <= 1:
+        position = "This is the FIRST contact with this person."
+    else:
+        position = (
+            f"This is FOLLOW-UP number {email.touch - 1} (touch {email.touch}). "
+            "The prospect has not replied. Judge it as a follow-up: it should be "
+            "shorter than the first email, should not re-introduce the company "
+            "from scratch, and should give a new reason to reply rather than "
+            "repeating the first one."
+        )
+
     return (
+        f"{position}\n\n"
         f"Subject: {email.subject}\n"
         f"To: {', '.join(email.recipients) or '(none)'}\n"
         f"---\n{body}"

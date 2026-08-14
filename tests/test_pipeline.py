@@ -62,10 +62,15 @@ def test_classify() -> None:
     check("classify: internal skipped", not v.graded)
     check("classify: internal reason", v.reason == "internal only", v.reason)
 
+    # A bare "Re:" with no touch information is only skipped when the config
+    # asks for first contacts only. The default now grades follow-ups, because
+    # the archive mailbox makes the whole sequence visible.
     reply = Email(message_id="3", to=["dana@acme.com"], subject="Re: Your Q3 plan",
                   in_reply_to="<x@y>", body_text=body)
-    v = classify.classify(reply, cfg)
-    check("classify: reply skipped", not v.graded)
+    strict = make_config()
+    strict.grade_first_contact_only = True
+    v = classify.classify(reply, strict)
+    check("classify: reply skipped when first-contact-only", not v.graded)
     check("classify: reply reason", "reply" in v.reason, v.reason)
 
     excluded = Email(message_id="4", to=["accountant@example.com"], subject="Hi",
@@ -99,11 +104,67 @@ def test_classify() -> None:
                   subject="Your Q3 plan", body_text=body)
     check("classify: mixed recipients graded", classify.classify(mixed, cfg).graded)
 
-    # first_contact_only off means replies get graded too
-    cfg2 = make_config()
-    cfg2.grade_first_contact_only = False
-    check("classify: replies graded when configured",
-          classify.classify(reply, cfg2).graded)
+    check("classify: replies graded by default", classify.classify(reply, cfg).graded)
+
+
+def test_classify_follow_ups() -> None:
+    """The archive mailbox makes the whole sequence visible, which is the only
+    reason any of this can be told apart."""
+    cfg = make_config()
+    body = "Hi Dana,\n\nJust bumping this up in case it got buried. Free Thursday?"
+
+    first = Email(message_id="f1", to=["dana@acme.com"], subject="Your Q3 plan",
+                  body_text=body, touch=1)
+    check("follow-up: first contact graded", classify.classify(first, cfg).graded)
+
+    second = Email(message_id="f2", to=["dana@acme.com"], subject="Re: Your Q3 plan",
+                   body_text=body, touch=2)
+    check("follow-up: second touch graded", classify.classify(second, cfg).graded)
+
+    # Past the sequence worth coaching.
+    late = Email(message_id="f3", to=["dana@acme.com"], subject="Re: Your Q3 plan",
+                 body_text=body, touch=9)
+    v = classify.classify(late, cfg)
+    check("follow-up: very late touch skipped", not v.graded)
+    check("follow-up: late reason names the touch", "touch 9" in v.reason, v.reason)
+
+    # THE important one: once they have written back it is a conversation.
+    answered = Email(message_id="f4", to=["dana@acme.com"], subject="Re: Your Q3 plan",
+                     body_text=body, touch=2, prospect_replied=True)
+    v = classify.classify(answered, cfg)
+    check("follow-up: after a reply it is not outreach", not v.graded)
+    check("follow-up: reason says conversation", "conversation" in v.reason, v.reason)
+
+    cfg_off = make_config()
+    cfg_off.grade_follow_ups = False
+    check("follow-up: can be switched off",
+          not classify.classify(second, cfg_off).graded)
+
+
+def test_follow_up_rules() -> None:
+    """Two rules have to know about follow-ups or they punish correct work."""
+    short = "Hi Dana, bumping this up. Free Thursday?"
+
+    first = Email(to=["d@a.com"], subject="X", body_text=short, touch=1)
+    follow = Email(to=["d@a.com"], subject="X", body_text=short, touch=2)
+    check("follow-up rules: short first contact flagged",
+          "body.too_short" in {f.id for f in checks.check_body_shape(first)})
+    check("follow-up rules: short follow-up allowed",
+          "body.too_short" not in {f.id for f in checks.check_body_shape(follow)},
+          f"{len(short.split())} words")
+    # But a follow-up with genuinely nothing in it is still worth flagging.
+    empty = Email(to=["d@a.com"], subject="X", body_text="Just checking in", touch=2)
+    check("follow-up rules: contentless follow-up still flagged",
+          "body.too_short" in {f.id for f in checks.check_body_shape(empty)})
+
+    # "Re:" without threading headers is faked on a first contact, and entirely
+    # normal on a follow-up.
+    fake = Email(subject="Re: our chat", body_text=GOOD_BODY, touch=1)
+    genuine = Email(subject="Re: our chat", body_text=GOOD_BODY, touch=2)
+    check("follow-up rules: fake Re: flagged on first contact",
+          "subject.fake_reply" in {f.id for f in checks.check_subject(fake)})
+    check("follow-up rules: Re: fine on a follow-up",
+          "subject.fake_reply" not in {f.id for f in checks.check_subject(genuine)})
 
 
 def test_split_counts() -> None:
@@ -116,6 +177,7 @@ def test_split_counts() -> None:
         Email(message_id="d", to=["dana@acme.com"], subject="Re: X",
               in_reply_to="<1@2>", body_text=body),
     ]
+    cfg.grade_first_contact_only = True
     keep, skipped = classify.split(emails, cfg)
     check("split: one kept", len(keep) == 1, str(len(keep)))
     check("split: two internal counted", skipped.get("internal only") == 2,
@@ -275,7 +337,7 @@ def test_producer_report() -> None:
 
     empty = summaries[2]
     empty_html = report.producer_html(empty, date(2026, 8, 14), previous=None)
-    check("producer: empty day handled", "No first-contact emails" in empty_html)
+    check("producer: empty day handled", "No outreach emails" in empty_html)
 
     text = report.producer_text(maria, date(2026, 8, 14))
     check("producer text: has score", "/100" in text)

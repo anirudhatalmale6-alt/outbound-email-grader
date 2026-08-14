@@ -95,6 +95,32 @@ def check_settings():
     else:
         report(OK, f"Admin address: {cfg.delegated_admin}")
 
+    if cfg.mode == "archive":
+        if not cfg.archive_mailbox:
+            report(BAD, "google.archive_mailbox is not set",
+                   "Archive mode needs the address every producer BCCs.")
+        else:
+            report(OK, f"Archive mode, reading {cfg.archive_mailbox}")
+            # A typo here fails silently forever: the grader reads an empty
+            # mailbox and reports nothing, with no error anywhere. So the
+            # domain gets checked against the one the producers actually use.
+            archive_domain = cfg.archive_mailbox.rsplit("@", 1)[-1]
+            producer_domains = {
+                p.email.rsplit("@", 1)[-1].lower() for p in cfg.active_producers
+            }
+            if producer_domains and archive_domain not in producer_domains:
+                report(WARN,
+                       f"The archive is on {archive_domain} but the producers "
+                       f"are on {', '.join(sorted(producer_domains))}",
+                       "Check the spelling. A wrong archive address does not "
+                       "raise an error - it just reads an empty mailbox and "
+                       "reports nothing, every day.")
+    elif cfg.mode == "per_mailbox":
+        report(OK, "Per-mailbox mode, reading each producer's Sent folder")
+    else:
+        report(BAD, f"google.mode is {cfg.mode!r}",
+               "Must be either archive or per_mailbox.")
+
     if not cfg.anthropic_api_key:
         report(BAD, "No Anthropic API key",
                "Set anthropic.api_key in config.yaml, or export ANTHROPIC_API_KEY.")
@@ -188,9 +214,55 @@ def check_gmail(cfg) -> None:
     if not good:
         return
 
+    if cfg.mode == "archive":
+        if not cfg.archive_mailbox:
+            return
+        good, message = gmail.selftest(cfg, cfg.archive_mailbox)
+        report(OK if good else BAD,
+               f"Archive mailbox {cfg.archive_mailbox}", message)
+        if good:
+            _archive_contents(cfg)
+        return
+
     for producer in cfg.active_producers:
         good, message = gmail.selftest(cfg, producer.email)
         report(OK if good else BAD, producer.email, "" if good else message)
+
+
+def _archive_contents(cfg) -> None:
+    """Reading the archive is not enough - it has to actually contain the
+    producers' mail. An empty or mis-routed archive is the failure mode most
+    likely to go unnoticed, because nothing errors."""
+    from grader import archive
+    from datetime import datetime, timedelta, timezone
+    try:
+        found = archive.fetch_archive(
+            cfg, datetime.now(timezone.utc) - timedelta(days=7)
+        )
+    except Exception as exc:
+        report(WARN, "Could not sample the archive", str(exc)[:250])
+        return
+
+    if not found:
+        report(BAD, "The archive contains no producer mail from the last 7 days",
+               "Either nobody sent anything, or the BCC rule is not routing to "
+               "this address. Check one producer's Sent folder against it.")
+        return
+
+    senders = sorted({e.sender for e in found})
+    report(OK, f"{len(found)} producer message(s) in the last 7 days")
+    for sender in senders[:10]:
+        n = sum(1 for e in found if e.sender == sender)
+        touches = sorted({e.touch for e in found if e.sender == sender})
+        print(f"           {sender}: {n} message(s), touches {touches}")
+
+    silent = [
+        p.email for p in cfg.active_producers
+        if p.email.lower() not in {s.lower() for s in senders}
+    ]
+    if silent:
+        report(WARN, f"Nothing at all from: {', '.join(silent)}",
+               "Check their BCC rule before reading anything into a zero score.")
 
 
 def check_rules() -> None:

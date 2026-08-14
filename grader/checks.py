@@ -62,6 +62,19 @@ class Email:
     references: str = ""
     labels: list[str] = field(default_factory=list)
 
+    # Where this message sits in a sequence to the same prospect. 1 = first
+    # contact, 2 = first follow-up, and so on. Set when reading from an archive
+    # mailbox, where the whole thread is visible.
+    touch: int = 1
+    # True if the prospect wrote back at some point in the thread. A "follow-up"
+    # to someone who already replied is a conversation, not chasing silence, and
+    # must not be graded as cold outreach.
+    prospect_replied: bool = False
+
+    @property
+    def is_follow_up(self) -> bool:
+        return self.touch > 1
+
     @property
     def is_reply(self) -> bool:
         if self.in_reply_to.strip() or self.references.strip():
@@ -349,7 +362,11 @@ def check_subject(email: Email) -> list[Finding]:
             )
         )
 
-    if email.is_reply and not (email.in_reply_to or email.references):
+    if (
+        email.touch == 1
+        and email.is_reply
+        and not (email.in_reply_to or email.references)
+    ):
         out.append(
             Finding(
                 "subject.fake_reply", "compliance", "high",
@@ -369,11 +386,14 @@ def check_body_shape(email: Email) -> list[Finding]:
     body = email.body.strip()
     words = body.split()
 
-    if len(words) < 20:
+    floor = 6 if email.is_follow_up else 20
+    if len(words) < floor:
         out.append(
             Finding(
                 "body.too_short", "hygiene", "medium",
                 f"The message body is only {len(words)} words.",
+                "A follow-up can be short, but it still needs a reason to "
+                "reply." if email.is_follow_up else
                 "A first contact needs enough for the reader to know who you "
                 "are and why you are writing.",
             )

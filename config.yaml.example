@@ -6,9 +6,22 @@
 # =====================================================================
 
 google:
+  # "archive"     - read ONE mailbox that every producer BCCs. Recommended.
+  # "per_mailbox" - open each producer's own Sent folder.
+  #
+  # Archive is better in every way that matters: one account to authorise
+  # instead of the whole domain, it is a copy so nothing here can touch
+  # anyone's real mail, and the whole thread is visible so a follow-up can
+  # be told apart from a first contact.
+  mode: archive
+
+  # The BCC archive address. Only used in archive mode.
+  # Check this spelling character by character. If it is wrong the grader
+  # reads an empty mailbox and reports nothing, every day, without error.
+  archive_mailbox: cortex@yourcompany.com
+
   # The JSON key file for the service account. Keep it next to this file
-  # and keep it out of any shared drive - it can read every mailbox in
-  # the domain. Setup steps: docs/GOOGLE-SETUP.md
+  # and out of any shared drive. Setup steps: docs/GOOGLE-SETUP.md
   service_account_file: service-account.json
 
   # A Google Workspace admin address. Used to send the reports from.
@@ -42,10 +55,21 @@ producers:
 #  What counts as a gradeable email
 # ---------------------------------------------------------------------
 scope:
-  # Grade only the first message in a thread. Strongly recommended:
-  # grading a reply against a cold-email standard produces a bad score
-  # for an email that was never trying to be a cold email.
-  first_contact_only: true
+  # Grade follow-ups as well as first contacts. The grader is told which
+  # touch it is looking at, so a follow-up is judged as a follow-up -
+  # shorter, no re-introduction, a new reason to reply.
+  follow_ups: true
+
+  # Stop grading after this many touches to the same person. Past four,
+  # the problem is the sequence, not the writing.
+  max_touch: 4
+
+  # Once the prospect has replied it is a conversation, not outreach, and
+  # a cold-email standard measures nothing useful about it. Leave false.
+  grade_after_reply: false
+
+  # Only relevant in per_mailbox mode, where thread position is unknown.
+  first_contact_only: false
 
   # Mail to these domains is internal and is never graded. The Workspace
   # domain above is included automatically.
@@ -85,6 +109,12 @@ reporting:
 run:
   lookback_days: 1
   max_emails_per_producer: 200
+  max_threads: 1000
+
+  # Warn when a producer's mail never reaches the archive. Worth keeping on:
+  # a broken BCC rule and a producer who sent nothing look identical in the
+  # data, and only one of those is the producer's fault.
+  quiet_producer_warning: true
   database: grader.sqlite3
   # The written standard everything is graded against. This is the
   # Gemini document - put it here as plain text or markdown.
