@@ -156,7 +156,7 @@ you can always tell a setup problem from a code problem.
   itself recommends is recognised by the tool. A rule that fires when it should
   not is not a cosmetic bug here — it tells an employee they did something wrong
   when they did not.
-- 68 checks on the pipeline: filtering, scoring, storage and both reports,
+- 80 checks on the pipeline: filtering, scoring, storage and both reports,
   including that one producer's report cannot leak another's, that a subject
   line containing HTML is escaped rather than rendered, and that message bodies
   never reach the database.
