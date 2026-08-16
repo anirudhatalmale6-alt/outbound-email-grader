@@ -11,13 +11,22 @@ access gets revoked or you want to point the grader at a different mailbox.
 What it grants: read mail, and send mail, as that one account. Not delete, not
 modify, not settings, and not anybody else's mailbox.
 
-If the machine that runs the grader has no browser -- a server, a VPS -- do this
-on your laptop instead and copy the resulting token.json across. It is the token
-that matters, not where it was made.
+On a server with no browser -- a VPS, anything you reach over SSH -- use a fixed
+port and forward it from the machine you are sitting at:
+
+    ssh -L 8080:localhost:8080 you@your-server
+    python3 authorise.py --port 8080
+
+Then open the printed link in your own browser. The sign-in happens on your
+machine, the token lands on the server, and nothing has to be copied by hand.
+
+Failing that, run this on your laptop and copy the resulting token.json across.
+It is the token that matters, not where it was made.
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -33,6 +42,20 @@ def fail(message: str) -> int:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Sign in once so the grader can read the archive mailbox."
+    )
+    parser.add_argument(
+        "--port", type=int, default=0,
+        help="Fixed port for the sign-in callback. Use with an SSH tunnel when "
+             "the machine running this has no browser of its own.",
+    )
+    parser.add_argument(
+        "--no-browser", action="store_true",
+        help="Print the sign-in link instead of trying to open a browser.",
+    )
+    args = parser.parse_args()
+
     print("\n  Authorising the email grader\n  " + "-" * 40)
 
     try:
@@ -78,19 +101,31 @@ def main() -> int:
     if expected:
         print(f"\n  Sign in as: {expected}")
         print("  Signing in as anyone else will authorise the wrong mailbox.")
-    print("\n  A browser window will open. Approve the two permissions it asks")
-    print("  for -- reading mail, and sending mail.\n")
+    if args.no_browser or args.port:
+        print("\n  Open the link below in your own browser and approve the two")
+        print("  permissions it asks for -- reading mail, and sending mail.\n")
+    else:
+        print("\n  A browser window will open. Approve the two permissions it asks")
+        print("  for -- reading mail, and sending mail.\n")
 
     try:
         flow = InstalledAppFlow.from_client_secrets_file(
             str(cfg.oauth_client_file), gmail.SCOPES
         )
-        creds = flow.run_local_server(port=0, prompt="consent")
+        creds = flow.run_local_server(
+            port=args.port,
+            prompt="consent",
+            open_browser=not (args.no_browser or args.port),
+        )
     except Exception as exc:
         return fail(
             f"Sign-in did not complete: {exc}\n\n"
-            "  If this machine has no browser, run this on your laptop and copy\n"
-            "  token.json across."
+            "  On a server with no browser, forward the port from the machine\n"
+            "  you are sitting at and use it:\n\n"
+            "      ssh -L 8080:localhost:8080 you@your-server\n"
+            "      python3 authorise.py --port 8080\n\n"
+            "  Then open the printed link in your own browser. Or run this on\n"
+            "  your laptop and copy token.json across."
         )
 
     gmail.save_oauth_token(cfg, creds)

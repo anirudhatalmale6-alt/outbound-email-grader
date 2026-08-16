@@ -74,9 +74,19 @@ as the right one, and then reads the wrong mailbox every day without ever
 erroring, so `authorise.py` and `check.py` both compare it against your settings
 and refuse to continue if they disagree.
 
-**If the machine that runs the grader has no browser** — a server or a VPS — run
-`authorise.py` on your laptop and copy `token.json` across. It is the token that
-matters, not where it was created.
+**If the machine that runs the grader has no browser** — a server or a VPS —
+forward the port from the machine you are sitting at:
+
+```
+ssh -L 8080:localhost:8080 you@your-server
+python3 authorise.py --port 8080
+```
+
+Open the printed link in your own browser. The sign-in happens on your machine,
+the token lands on the server, nothing is copied by hand.
+
+Failing that, run `authorise.py` on your laptop and copy `token.json` across. It
+is the token that matters, not where it was created.
 
 ## 5. Check it
 
