@@ -392,6 +392,20 @@ def selftest(cfg: Config, user: str) -> tuple[bool, str]:
         return False, str(exc)
     except Exception as exc:
         message = str(exc)
+        if "has not been used in project" in message or "accessNotConfigured" in message:
+            # Almost always two projects with the same name: the API was
+            # enabled in one and the credential was created in the other.
+            project = ""
+            match = re.search(r"project (\d+)", message)
+            if match:
+                project = f" (project {match.group(1)})"
+            return False, (
+                f"The Gmail API is not enabled in the Google Cloud project this "
+                f"credential belongs to{project}.\n"
+                "Cloud console > APIs and Services > Library > Gmail API > "
+                "Enable - making sure the project selector at the top is the "
+                "same project the credential was created in."
+            )
         if cfg.auth == "oauth" and (
             "invalid_grant" in message or "invalid_scope" in message
         ):
