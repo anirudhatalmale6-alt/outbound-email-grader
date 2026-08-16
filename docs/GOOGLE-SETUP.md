@@ -53,8 +53,15 @@ assuming something is wrong.
 python3 check.py
 ```
 
-Under **Google Workspace** you should see a line for the admin address and one
-for each producer. If they are all `[ ok ]`, you are done.
+In **archive mode** (the default) you should see the admin address, the archive
+mailbox, and then a count of producer messages found in it along with the names
+it could see. That last part matters more than the `[ ok ]` above it: the key can
+open the mailbox long before the mailbox actually contains everybody's mail. If a
+producer is missing from that list, their BCC rule is not firing.
+
+In **per-mailbox mode** you get one line per producer instead.
+
+If every line is `[ ok ]`, you are done.
 
 ---
 
@@ -104,8 +111,18 @@ that.** The key itself can reach every mailbox in the domain. Nothing outside
   already read the mail anyway — the risk is the key file getting out, not the
   console.
 
-If reading every producer's Sent folder is more access than you want to grant,
-there is a narrower option: have each producer set up a filter that copies their
-outbound mail to one shared mailbox, and point the grader at that instead. It is
-more work for them and easier to switch off quietly, but the key then only opens
-one mailbox. Say the word and I will set it up that way.
+**Archive mode is the narrower option, and it is already the default.** Because
+every producer BCCs one mailbox, the grader only ever opens that one address. It
+never touches a producer's own mailbox, and what it reads is a copy, so nothing
+it does can affect anybody's real mail even by accident.
+
+Worth being precise about what that does and does not buy you. It genuinely
+narrows what the *software* opens. It does not narrow what the *key* could open —
+domain-wide delegation is domain-wide whichever mode you run, so the key file is
+still the thing to guard. What archive mode removes is the need to trust the
+producer list in `config.yaml` to keep the software out of individual mailboxes.
+
+The trade is that a BCC rule can be switched off quietly, and then a producer
+looks like they sent nothing. The grader watches for that and says so by name in
+the report rather than showing them a zero — but it is the one failure mode this
+mode has that reading Sent folders does not.
