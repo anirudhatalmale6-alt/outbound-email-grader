@@ -6,6 +6,25 @@
 # =====================================================================
 
 google:
+  # How the grader signs in.
+  #
+  # "oauth"           - sign in once in a browser as the archive mailbox.
+  #                     Reaches that ONE mailbox and nothing else. No key
+  #                     file. Works where key files are blocked by policy.
+  #                     Run: python3 authorise.py
+  # "service_account" - domain-wide delegation. No interactive sign-in, so
+  #                     it suits an unattended server, but the key can act
+  #                     as any user in the Workspace and only this file
+  #                     keeps it aimed at the right mailbox.
+  auth: oauth
+
+  # --- oauth only ---
+  # Downloaded from Cloud console > Credentials > OAuth client ID >
+  # Desktop app. Written by you.
+  oauth_client_file: oauth_client.json
+  # Written by authorise.py. Treat it like a password.
+  oauth_token_file: token.json
+
   # "archive"     - read ONE mailbox that every producer BCCs. Recommended.
   # "per_mailbox" - open each producer's own Sent folder.
   #
@@ -20,8 +39,9 @@ google:
   # reads an empty mailbox and reports nothing, every day, without error.
   archive_mailbox: cortex@yourcompany.com
 
-  # The JSON key file for the service account. Keep it next to this file
-  # and out of any shared drive. Setup steps: docs/GOOGLE-SETUP.md
+  # --- service_account only ---
+  # The JSON key file. Keep it next to this file and out of any shared
+  # drive. Setup steps: docs/GOOGLE-SETUP.md
   service_account_file: service-account.json
 
   # A Google Workspace admin address. Used to send the reports from.
@@ -90,8 +110,18 @@ scope:
 reporting:
   manager_email: you@yourcompany.com
 
-  # Reports are sent from here. Blank = the delegated_admin above.
+  # Reports are sent from here.
+  # Blank = the archive mailbox in oauth mode, delegated_admin otherwise.
+  #
+  # In oauth mode this really has to be the mailbox you signed in as.
+  # Gmail will not honour a From header that account does not own - it
+  # rewrites it silently - so a mismatch is refused rather than sending
+  # reports that claim to be from someone they are not.
   send_from:
+
+  # Set true only if send_from above is a verified send-as alias on the
+  # mailbox that signed in. Then the mismatch check is skipped.
+  send_from_is_alias: false
 
   # TRUE = only the manager gets a report. The producers get nothing.
   # Leave this on for the first week or two. Read the grades yourself,

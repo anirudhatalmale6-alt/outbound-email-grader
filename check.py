@@ -74,26 +74,48 @@ def check_settings():
         report(BAD, "config.yaml could not be read", str(exc)[:300])
         return None
 
-    if cfg.service_account_file and cfg.service_account_file.exists():
-        report(OK, f"Service account key found ({cfg.service_account_file.name})")
-        try:
-            import json
-            data = json.loads(cfg.service_account_file.read_text())
-            report(OK, f"Key is for {data.get('client_email', '?')}")
-            if data.get("client_id"):
-                print(f"           Client ID (needed in the Admin console): "
-                      f"{data['client_id']}")
-        except Exception as exc:
-            report(BAD, "The key file is not readable JSON", str(exc)[:200])
-    else:
-        report(BAD, "Service account key not found",
-               f"Looked for: {cfg.service_account_file or '(not set)'}\n"
-               "See docs/GOOGLE-SETUP.md.")
+    if cfg.auth == "oauth":
+        report(OK, "Sign-in method: OAuth (one mailbox, no key file)")
+        if cfg.oauth_token_file.exists():
+            report(OK, f"Token found ({cfg.oauth_token_file.name})")
+        elif cfg.oauth_client_file.exists():
+            report(BAD, "Not authorised yet",
+                   "The OAuth client is in place but nobody has signed in.\n"
+                   "Run: python3 authorise.py")
+        else:
+            report(BAD, "No OAuth client file",
+                   f"Looked for: {cfg.oauth_client_file}\n"
+                   "Cloud console > Credentials > Create credentials >\n"
+                   "OAuth client ID > Desktop app. See docs/GOOGLE-SETUP.md.")
+        if cfg.mode == "per_mailbox":
+            report(BAD, "per_mailbox mode cannot work with OAuth",
+                   "One sign-in authorises one mailbox. Use archive mode, or "
+                   "switch google.auth to service_account.")
+    elif cfg.auth == "service_account":
+        report(OK, "Sign-in method: service account (domain-wide delegation)")
+        if cfg.service_account_file.is_file():
+            report(OK, f"Service account key found ({cfg.service_account_file.name})")
+            try:
+                import json
+                data = json.loads(cfg.service_account_file.read_text())
+                report(OK, f"Key is for {data.get('client_email', '?')}")
+                if data.get("client_id"):
+                    print(f"           Client ID (needed in the Admin console): "
+                          f"{data['client_id']}")
+            except Exception as exc:
+                report(BAD, "The key file is not readable JSON", str(exc)[:200])
+        else:
+            report(BAD, "Service account key not found",
+                   f"Looked for: {cfg.service_account_file or '(not set)'}\n"
+                   "See docs/GOOGLE-SETUP.md.")
 
-    if not cfg.delegated_admin:
-        report(BAD, "google.delegated_admin is not set")
+        if not cfg.delegated_admin:
+            report(BAD, "google.delegated_admin is not set")
+        else:
+            report(OK, f"Admin address: {cfg.delegated_admin}")
     else:
-        report(OK, f"Admin address: {cfg.delegated_admin}")
+        report(BAD, f"google.auth is {cfg.auth!r}",
+               "Must be either oauth or service_account.")
 
     if cfg.mode == "archive":
         if not cfg.archive_mailbox:
@@ -200,19 +222,56 @@ def check_claude(cfg) -> None:
 
 def check_gmail(cfg) -> None:
     heading("Google Workspace")
-    if cfg is None or not cfg.service_account_file or not cfg.service_account_file.exists():
-        report(WARN, "Skipped - no service account key")
+    if cfg is None:
+        report(WARN, "Skipped - no settings")
         return
     from grader import gmail
 
-    # The admin first: if delegation is broken it is broken for everybody, and
-    # saying so once is more useful than the same error per producer.
-    good, message = gmail.selftest(cfg, cfg.delegated_admin)
-    report(OK if good else BAD,
-           f"Admin mailbox {cfg.delegated_admin}" if good else "Delegation is not working",
-           message)
-    if not good:
-        return
+    if cfg.auth == "oauth":
+        if not cfg.oauth_token_file.exists():
+            report(WARN, "Skipped - not authorised yet",
+                   "Run: python3 authorise.py")
+            return
+        try:
+            signed_in = gmail.authorised_address(cfg)
+        except Exception as exc:
+            report(BAD, "The stored sign-in does not work", str(exc)[:300])
+            return
+        report(OK, f"Signed in as {signed_in}")
+
+        # The sign-in succeeding says nothing about it being the right account.
+        # Approving as the wrong user works perfectly and then reads the wrong
+        # mailbox every day without complaint.
+        if cfg.archive_mailbox and signed_in != cfg.archive_mailbox.lower():
+            report(BAD,
+                   f"Signed in as {signed_in}, but the settings read "
+                   f"{cfg.archive_mailbox}",
+                   "These have to match. Re-run authorise.py signed in as "
+                   f"{cfg.archive_mailbox}, or change google.archive_mailbox.")
+            return
+
+        sender = cfg.send_from or ""
+        if sender and sender.lower() != signed_in and not cfg.send_from_is_alias:
+            report(BAD,
+                   f"reporting.send_from is {sender} but the sign-in is "
+                   f"{signed_in}",
+                   "Gmail would rewrite the From header, so the reports would "
+                   f"arrive from {signed_in} anyway. Set send_from to "
+                   f"{signed_in}, or set send_from_is_alias: true if it is a "
+                   "verified send-as alias.")
+    else:
+        if not cfg.service_account_file.is_file():
+            report(WARN, "Skipped - no service account key")
+            return
+        # The admin first: if delegation is broken it is broken for everybody,
+        # and saying so once is more useful than the same error per producer.
+        good, message = gmail.selftest(cfg, cfg.delegated_admin)
+        report(OK if good else BAD,
+               f"Admin mailbox {cfg.delegated_admin}" if good
+               else "Delegation is not working",
+               message)
+        if not good:
+            return
 
     if cfg.mode == "archive":
         if not cfg.archive_mailbox:

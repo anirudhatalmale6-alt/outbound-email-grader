@@ -39,7 +39,26 @@ class Producer:
 @dataclass
 class Config:
     # --- Google Workspace ---
-    service_account_file: Path = Path()
+    # How the grader proves who it is.
+    #
+    # "oauth" signs in once, in a browser, as one specific mailbox, and stores a
+    # refresh token. It can reach that mailbox and nothing else.
+    #
+    # "service_account" uses domain-wide delegation: a key file that can act as
+    # any user in the Workspace, pointed at particular addresses by the settings
+    # below. More power than the job needs, but it needs no interactive sign-in,
+    # which suits an unattended server.
+    #
+    # Many organisations now block downloadable service account keys by policy
+    # (iam.disableServiceAccountKeyCreation). Where that is on, oauth is the
+    # route that does not require weakening it.
+    auth: str = "oauth"
+    # Not Path(): an unset Path() is ".", which is a real directory, so every
+    # "is the key there?" test would pass and the failure would surface much
+    # later as an unreadable-key error.
+    service_account_file: Path = APP_DIR / "service-account.json"
+    oauth_client_file: Path = APP_DIR / "oauth_client.json"
+    oauth_token_file: Path = APP_DIR / "token.json"
     delegated_admin: str = ""          # an admin address in the domain
     domain: str = ""                   # e.g. dncsearch.com
 
@@ -77,6 +96,11 @@ class Config:
     # Shadow mode: only the manager gets reports. Producers get nothing.
     # This stays on until the grades have been checked against real judgement.
     shadow_mode: bool = True
+    # In oauth mode the reports can only really come from the mailbox that was
+    # authorised. If send_from is a verified send-as alias on that mailbox this
+    # says so; otherwise a mismatch is refused rather than quietly rewritten by
+    # Gmail into a report that claims to be from someone it is not.
+    send_from_is_alias: bool = False
     report_subject_manager: str = "Outbound email report - {date}"
     report_subject_producer: str = "Your outbound email report - {date}"
 
@@ -127,10 +151,18 @@ def load(path: Path | None = None, strict: bool = True) -> Config:
     cfg = Config()
 
     google = raw.get("google", {}) or {}
-    sa = str(google.get("service_account_file", "")).strip()
-    if sa:
-        candidate = Path(os.path.expandvars(sa)).expanduser()
-        cfg.service_account_file = candidate if candidate.is_absolute() else APP_DIR / candidate
+    cfg.auth = str(google.get("auth", cfg.auth)).strip().lower() or cfg.auth
+
+    def _path(key: str, current: Path) -> Path:
+        value = str(google.get(key, "")).strip()
+        if not value:
+            return current
+        candidate = Path(os.path.expandvars(value)).expanduser()
+        return candidate if candidate.is_absolute() else APP_DIR / candidate
+
+    cfg.service_account_file = _path("service_account_file", cfg.service_account_file)
+    cfg.oauth_client_file = _path("oauth_client_file", cfg.oauth_client_file)
+    cfg.oauth_token_file = _path("oauth_token_file", cfg.oauth_token_file)
     cfg.delegated_admin = str(google.get("delegated_admin", "")).strip()
     cfg.domain = str(google.get("domain", "")).strip()
     cfg.mode = str(google.get("mode", cfg.mode)).strip().lower() or cfg.mode
@@ -179,8 +211,17 @@ def load(path: Path | None = None, strict: bool = True) -> Config:
 
     reporting = raw.get("reporting", {}) or {}
     cfg.manager_email = str(reporting.get("manager_email", "")).strip()
-    cfg.send_from = str(reporting.get("send_from", "")).strip() or cfg.delegated_admin
+    # In oauth mode the only address that can genuinely send is the one that was
+    # authorised, so that is the sensible default rather than the admin address.
+    _default_sender = (
+        cfg.archive_mailbox if cfg.auth == "oauth" and cfg.archive_mailbox
+        else cfg.delegated_admin
+    )
+    cfg.send_from = str(reporting.get("send_from", "")).strip() or _default_sender
     cfg.shadow_mode = bool(reporting.get("shadow_mode", cfg.shadow_mode))
+    cfg.send_from_is_alias = bool(
+        reporting.get("send_from_is_alias", cfg.send_from_is_alias)
+    )
     cfg.report_subject_manager = str(
         reporting.get("subject_manager", cfg.report_subject_manager)
     )
@@ -213,13 +254,30 @@ def load(path: Path | None = None, strict: bool = True) -> Config:
 
 def _validate(cfg: Config) -> None:
     problems: list[str] = []
-    if not cfg.service_account_file or not cfg.service_account_file.exists():
+    if cfg.auth not in ("oauth", "service_account"):
         problems.append(
-            f"google.service_account_file is missing or not found "
-            f"({cfg.service_account_file or 'not set'})"
+            f"google.auth must be oauth or service_account, not {cfg.auth!r}"
         )
-    if not cfg.delegated_admin:
-        problems.append("google.delegated_admin is not set")
+    elif cfg.auth == "oauth":
+        if not cfg.oauth_token_file.exists():
+            problems.append(
+                f"no OAuth token at {cfg.oauth_token_file}. Run: python3 authorise.py"
+            )
+        # One sign-in authorises one mailbox, so per-mailbox mode would need
+        # every producer to sit down and consent individually.
+        if cfg.mode == "per_mailbox":
+            problems.append(
+                "google.mode is per_mailbox, which oauth cannot do: one sign-in "
+                "authorises one mailbox. Use archive mode, or auth: service_account."
+            )
+    else:
+        if not cfg.service_account_file.is_file():
+            problems.append(
+                f"google.service_account_file is missing or not found "
+                f"({cfg.service_account_file or 'not set'})"
+            )
+        if not cfg.delegated_admin:
+            problems.append("google.delegated_admin is not set")
     if cfg.mode not in ("archive", "per_mailbox"):
         problems.append(f"google.mode must be archive or per_mailbox, not {cfg.mode!r}")
     if cfg.mode == "archive" and not cfg.archive_mailbox:

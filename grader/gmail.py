@@ -1,16 +1,24 @@
 """
 Reading sent mail out of Google Workspace.
 
-Uses a service account with domain-wide delegation, so there is no per-person
-consent screen and nobody has to hand over a password. The scope is
-gmail.readonly plus gmail.send -- read what was sent, and send the reports.
-Nothing in this program can delete, move, or modify a message, because the
-scope to do so is never requested.
+Two ways in, and the difference is how much they can reach.
 
-Worth knowing: domain-wide delegation is a lot of power. The admin who grants
-it is granting the ability to read every mailbox in the domain. The scope list
-below is the only thing limiting it, and it is enforced by Google, not by this
-code -- see docs/GOOGLE-SETUP.md.
+OAuth (the default) signs in once, in a browser, as one mailbox, and keeps a
+refresh token. It can reach that mailbox and nothing else. Nothing about the
+credential can be pointed at a colleague's mail, so the limit does not depend on
+this program behaving.
+
+Service account with domain-wide delegation needs no interactive sign-in, which
+suits an unattended server, but the key can act as any user in the Workspace.
+Only config.yaml keeps it aimed at the right mailbox -- that limit is enforced
+here, not by Google. Many organisations now block downloadable service account
+keys outright, which is what pushed oauth to being the default.
+
+Either way the scopes are gmail.readonly plus gmail.send: read what was sent,
+and send the reports. Nothing here can delete, move, or modify a message,
+because the scope to do so is never requested, and that limit Google enforces.
+
+See docs/GOOGLE-SETUP.md.
 """
 
 from __future__ import annotations
@@ -34,18 +42,131 @@ class GmailError(Exception):
     pass
 
 
-def _service(cfg: Config, user: str):
-    """A Gmail client acting as `user`."""
+def _build(creds):
+    from googleapiclient.discovery import build
+
+    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+
+def _require_google_libraries() -> None:
     try:
-        from google.oauth2 import service_account
-        from googleapiclient.discovery import build
+        import googleapiclient.discovery  # noqa: F401
     except ImportError as exc:  # pragma: no cover
         raise GmailError(
             "The Google libraries are not installed. Run:\n"
             "  pip install -r requirements.txt"
         ) from exc
 
-    if not cfg.service_account_file.exists():
+
+def load_oauth_credentials(cfg: Config):
+    """The stored token, refreshed if it has expired.
+
+    Never starts an interactive sign-in. A daily job running unattended must
+    fail with something a human can act on rather than block forever waiting
+    for a browser that nobody is looking at -- authorise.py does the sign-in.
+    """
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+    except ImportError as exc:  # pragma: no cover
+        raise GmailError(
+            "The Google libraries are not installed. Run:\n"
+            "  pip install -r requirements.txt"
+        ) from exc
+
+    if not cfg.oauth_token_file.exists():
+        raise GmailError(
+            f"Not authorised yet - no token at {cfg.oauth_token_file}.\n"
+            "Run:  python3 authorise.py"
+        )
+
+    try:
+        creds = Credentials.from_authorized_user_file(
+            str(cfg.oauth_token_file), SCOPES
+        )
+    except Exception as exc:
+        raise GmailError(
+            f"Could not read {cfg.oauth_token_file}: {exc}\n"
+            "Delete it and run: python3 authorise.py"
+        ) from exc
+
+    if creds.valid:
+        return creds
+
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+        except Exception as exc:
+            raise GmailError(
+                f"The stored sign-in could not be refreshed: {exc}\n"
+                "This usually means access was revoked, the password was "
+                "changed, or the token went unused for six months. "
+                "Run: python3 authorise.py"
+            ) from exc
+        save_oauth_token(cfg, creds)
+        return creds
+
+    raise GmailError(
+        "The stored sign-in is no longer usable and cannot be refreshed. "
+        "Run: python3 authorise.py"
+    )
+
+
+def save_oauth_token(cfg: Config, creds) -> None:
+    """Write the token, readable only by the user running this."""
+    import os
+
+    path = cfg.oauth_token_file
+    path.write_text(creds.to_json(), encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        # Windows, or an exotic filesystem. Not worth failing the run over.
+        pass
+
+
+# Which mailbox a given token belongs to. Cached because _service() checks it on
+# every call and it cannot change without the token file changing.
+_AUTHORISED: dict[str, str] = {}
+
+
+def authorised_address(cfg: Config, service=None) -> str:
+    """Which mailbox the stored sign-in actually belongs to."""
+    key = str(cfg.oauth_token_file)
+    if key not in _AUTHORISED:
+        service = service or _build(load_oauth_credentials(cfg))
+        profile = service.users().getProfile(userId="me").execute()
+        _AUTHORISED[key] = (profile.get("emailAddress") or "").lower()
+    return _AUTHORISED[key]
+
+
+def _service(cfg: Config, user: str):
+    """A Gmail client acting as `user`.
+
+    In oauth mode there is only one identity available -- whoever signed in --
+    so `user` is checked against it rather than used to impersonate. Asking for
+    a mailbox the token does not cover is a configuration mistake, and it is far
+    better to say so than to quietly return the wrong mailbox's mail.
+    """
+    _require_google_libraries()
+
+    if cfg.auth == "oauth":
+        creds = load_oauth_credentials(cfg)
+        service = _build(creds)
+        wanted = (user or "").lower()
+        if wanted:
+            actual = authorised_address(cfg, service)
+            if actual and wanted != actual:
+                raise GmailError(
+                    f"Asked for {wanted} but the stored sign-in is {actual}. "
+                    "One sign-in covers one mailbox. Either point the settings at "
+                    f"{actual}, or re-run authorise.py signed in as {wanted}."
+                )
+        return service
+
+    from google.oauth2 import service_account
+
+    if not cfg.service_account_file.is_file():
         raise GmailError(f"Service account file not found: {cfg.service_account_file}")
 
     try:
@@ -55,7 +176,7 @@ def _service(cfg: Config, user: str):
     except Exception as exc:
         raise GmailError(f"Could not read the service account key: {exc}") from exc
 
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    return _build(creds)
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +341,22 @@ def send_report(cfg: Config, to: str, subject: str, html: str, text: str) -> str
     if not sender:
         raise GmailError("No send_from address configured.")
 
+    if cfg.auth == "oauth" and not cfg.send_from_is_alias:
+        # Gmail does not honour a From header the signed-in account does not own
+        # -- it silently rewrites it. A report that says it came from the boss
+        # but actually came from the archive mailbox is worse than a failed run,
+        # because nobody finds out.
+        actual = authorised_address(cfg)
+        if actual and sender.lower() != actual:
+            raise GmailError(
+                f"reporting.send_from is {sender} but the sign-in is {actual}. "
+                "Gmail would quietly rewrite the From header and the reports "
+                f"would arrive from {actual} regardless.\n"
+                f"Either set reporting.send_from to {actual}, or - if {sender} "
+                f"is a verified send-as alias on {actual} - set "
+                "reporting.send_from_is_alias: true."
+            )
+
     message = MIMEMultipart("alternative")
     message["To"] = to
     message["From"] = sender
@@ -250,8 +387,19 @@ def selftest(cfg: Config, user: str) -> tuple[bool, str]:
             f"{profile.get('emailAddress')} reachable "
             f"({profile.get('messagesTotal', '?')} messages)"
         )
+    except GmailError as exc:
+        # Already a plain-English message from the credential loader.
+        return False, str(exc)
     except Exception as exc:
         message = str(exc)
+        if cfg.auth == "oauth" and (
+            "invalid_grant" in message or "invalid_scope" in message
+        ):
+            return False, (
+                "The stored sign-in was rejected. Access may have been revoked "
+                "in the Google account's security settings, or the scopes "
+                "changed. Run: python3 authorise.py"
+            )
         if "unauthorized_client" in message:
             return False, (
                 "Google rejected the delegation. The client ID is not "

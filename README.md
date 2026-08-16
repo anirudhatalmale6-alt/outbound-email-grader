@@ -12,12 +12,19 @@ their own emails and what to change.
 pip install -r requirements.txt
 cp config.yaml.example config.yaml        # then edit it
 cp rubric.md.example rubric.md            # then replace it with YOUR standard
+python3 authorise.py                      # sign in once, in a browser
 python3 check.py                          # tells you what is still missing
 python3 run_daily.py --dry-run --days 7   # grades a week, sends nothing
 ```
 
-Google access takes about fifteen minutes to set up once:
+Google access takes about ten minutes to set up once:
 **docs/GOOGLE-SETUP.md**.
+
+Two ways to authorise, and the doc covers both. **OAuth** (the default) signs in
+once as the archive mailbox and can reach that mailbox and nothing else — no key
+file, and it works where your organisation blocks service account keys. **A
+service account** needs no interactive sign-in, which suits an unattended
+server, but the key can act as any user in the Workspace.
 
 When the reports look right, put it on a schedule:
 
