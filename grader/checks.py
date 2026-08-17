@@ -193,6 +193,26 @@ MERGE_TAG = re.compile(
     r"|(\*\|[A-Za-z0-9_ ]{1,38}\|\*)"        # *|FNAME|*  (Mailchimp)
 )
 
+# Looking BACK at a call or conversation. Deliberately past-tense only: an
+# invitation to call ("give me a call", "happy to jump on a call") is the point
+# of the email and must never be caught here.
+PRIOR_CONTACT = re.compile(
+    r"\bwe (?:spoke|talked|chatted)\b"
+    r"|\bi (?:spoke|talked|chatted) (?:with|to)\b"
+    r"|\bwhen we (?:spoke|talked)\b"
+    r"|\b(?:great|nice|good|lovely) (?:speaking|talking|chatting)\b"
+    r"|\bthanks? (?:for )?(?:taking|returning) (?:my|the|your) call\b"
+    r"|\b(?:per|after|following|during|on|from) (?:our|the|that) "
+    r"(?:call|conversation|chat|discussion)\b"
+    r"|\bas (?:we )?discussed\b"
+    r"|\bfollowing up on (?:our|the|your) (?:call|conversation|chat)\b"
+    r"|\b(?:spoke|speaking) (?:with|to) (?:your|the) "
+    r"(?:office|assistant|secretary|receptionist)\b"
+    r"|\byour (?:office|assistant|secretary|receptionist) "
+    r"(?:gave|passed|provided|shared)\b",
+    re.I,
+)
+
 # A postal address, loosely. CAN-SPAM wants a real one in commercial mail.
 ADDRESS_HINT = re.compile(
     r"\b(?:suite|ste\.?|floor|fl\.?|p\.?\s?o\.?\s?box|street|st\.|avenue|ave\.?"
@@ -581,6 +601,25 @@ def check_hygiene(email: Email) -> list[Finding]:
             )
         )
 
+    # House rule, not a legal one, which is why it is hygiene rather than
+    # compliance and why it can be switched off on its own. The company does
+    # not want the email referring to a phone call at all -- the call usually
+    # reached an assistant, so to the person reading it the reference means
+    # nothing, or worse, reads as a claim they were part of something.
+    prior = PRIOR_CONTACT.search(email.body)
+    if prior:
+        out.append(
+            Finding(
+                "hygiene.prior_contact_reference", "hygiene", "medium",
+                "The message refers back to an earlier call or conversation.",
+                "Take it out. Whoever was on the phone, the person reading "
+                "this often was not, so it either means nothing to them or "
+                "reads as a claim about them that is not true. Open on what "
+                "the email is actually for.",
+                _quote(prior.group(0)),
+            )
+        )
+
     if re.search(r"\b(lorem ipsum|todo|tbd|xxx|placeholder|insert \w+ here)\b",
                  haystack, re.I):
         out.append(
@@ -703,6 +742,7 @@ RULE_CODES = frozenset({
     "hygiene.multiple_recipients",
     "hygiene.no_plain_text",
     "hygiene.placeholder",
+    "hygiene.prior_contact_reference",
     "links.image_heavy",
     "links.insecure",
     "links.shortener",

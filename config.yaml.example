@@ -133,6 +133,10 @@ scoring:
   #
   # A code that does not exist is an error, not a shrug -- a typo here would
   # otherwise disable nothing while looking like it disabled something.
+  #
+  # hygiene.prior_contact_reference is a house rule rather than a legal one:
+  # it flags any look back at an earlier call. Switch it off here if you ever
+  # decide referring to the call is fine.
   disabled_rules: []
 
 # ---------------------------------------------------------------------

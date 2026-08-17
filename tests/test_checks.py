@@ -376,6 +376,60 @@ def test_after_call_defaults_off() -> None:
           Email().after_call is False)
 
 
+def test_prior_contact_reference_is_flagged() -> None:
+    """Client, twice, emphatically: no reference to an earlier call at all.
+    The call usually reached an assistant, so to the reader it means nothing."""
+    caught = [
+        "Great speaking with you earlier.",
+        "We spoke last week about broadcast segments.",
+        "I spoke with your office on Tuesday.",
+        "Following up on our call.",
+        "Per our conversation, here are the rates.",
+        "As discussed, the segment runs Thursday.",
+        "When we spoke you mentioned Q3.",
+        "Thanks for taking my call.",
+        "Your assistant gave me your address.",
+        "Nice chatting yesterday.",
+    ]
+    for line in caught:
+        e = Email(body_text="Hi Dana,\n\n" + line + "\n\nRates attached.")
+        check(f"prior contact caught: {line[:32]!r}",
+              "hygiene.prior_contact_reference" in ids(checks.check_hygiene(e)))
+
+
+def test_an_invitation_to_call_is_not_a_prior_contact() -> None:
+    """The rule looks BACKWARDS. Asking for a call is the point of the email
+    and flagging it would punish producers for doing their job."""
+    allowed = [
+        "Give me a call if that is useful.",
+        "Happy to jump on a call this week.",
+        "Would a quick call Thursday work?",
+        "Feel free to call me on 813 555 0100.",
+        "Let me know if a call would help.",
+        "I can talk you through it whenever suits.",
+        "Worth a conversation?",
+        "Call me back at your convenience.",
+    ]
+    for line in allowed:
+        e = Email(body_text="Hi Dana,\n\nWe place broadcast segments. " + line)
+        check(f"invitation not flagged: {line[:32]!r}",
+              "hygiene.prior_contact_reference" not in ids(checks.check_hygiene(e)))
+
+
+def test_prior_contact_is_hygiene_not_compliance() -> None:
+    """It is the company's house rule, not a legal requirement. Filing it as
+    compliance would put a policy preference in the section that means money."""
+    e = Email(body_text="Hi Dana,\n\nGreat speaking earlier.")
+    found = [f for f in checks.check_hygiene(e)
+             if f.id == "hygiene.prior_contact_reference"]
+    check("prior contact produces one finding", len(found) == 1)
+    if found:
+        check("prior contact is filed as hygiene", found[0].category == "hygiene",
+              found[0].category)
+        check("prior contact quotes the wording it caught",
+              "speaking" in found[0].evidence.lower(), found[0].evidence)
+
+
 def main() -> int:
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
