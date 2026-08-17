@@ -104,13 +104,16 @@ scope:
   # Anything shorter than this many characters is not worth grading.
   min_body_chars: 40
 
-  # Set this to true if your producers PHONE the prospect before emailing.
-  # The email is then a post-call follow-up, not a true cold email, and two
-  # things change:
-  #   - "following up on our call" stops being flagged as a false claim of
-  #     prior contact, because the contact really happened
-  #   - the writing half is told about the call, so it stops marking people
-  #     down for not re-introducing a company the prospect already spoke to
+  # Only set this true if the call reliably reaches THE PERSON BEING EMAILED.
+  #
+  # It is narrower than it sounds. If your producers phone an office and an
+  # assistant gives them the address, the recipient has never spoken to you --
+  # so an email saying they asked to be contacted is untrue to the only person
+  # who matters, and should keep being flagged. That is the common case, which
+  # is why this stays false.
+  #
+  # When true: "as you requested" stops being flagged, and the writing half is
+  # told about the call so it stops asking for a cold opening.
   preceded_by_call: false
 
 # ---------------------------------------------------------------------

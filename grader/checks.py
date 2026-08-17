@@ -650,8 +650,10 @@ def check_compliance(email: Email) -> list[Finding]:
             )
         )
 
-    # Where the prospect really was phoned first, referring to that is honest,
-    # and flagging it would be accusing somebody of a lie they did not tell.
+    # after_call only suppresses this where the call reached the RECIPIENT.
+    # Calling a switchboard and being given an address by an assistant is the
+    # common case, and to the person reading the email the claim is still
+    # untrue -- so this stays on unless the company says otherwise.
     if not email.after_call and re.search(
             r"\b(you (?:requested|asked|signed up|opted in)|as you requested"
             r"|per your request|following up on your (?:enquiry|inquiry|request))\b",
@@ -660,9 +662,11 @@ def check_compliance(email: Email) -> list[Finding]:
             Finding(
                 "compliance.false_prior_contact", "compliance", "medium",
                 "The message claims the recipient asked to be contacted.",
-                "If this is genuinely a first contact, that claim is not true "
-                "and it is exactly the kind of thing that turns a complaint "
-                "into a problem. Drop it.",
+                "Drop it. Even where a call did happen, it was often with an "
+                "assistant rather than the person reading this -- so to them "
+                "the claim is simply untrue, and an untrue claim of prior "
+                "contact is what turns a complaint into a problem. Refer to "
+                "the call plainly if you want to, without saying they asked.",
             )
         )
     return out

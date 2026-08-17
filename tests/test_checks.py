@@ -343,8 +343,9 @@ def test_disabled_rules_cannot_silence_a_broken_check() -> None:
 
 
 def test_after_call_stops_the_false_prior_contact_flag() -> None:
-    """He calls prospects before emailing. "Following up on our call" is then
-    true, and flagging it accuses a producer of a lie they did not tell."""
+    """Only where the call reached the RECIPIENT. This client phones offices
+    and is handed an address by an assistant, so the person reading the email
+    never spoke to anyone -- which is why he keeps this off."""
     claim = Email(
         subject="Following up",
         body_text=("Hi Dana,\n\nGreat speaking earlier. Following up on your "
