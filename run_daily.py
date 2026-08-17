@@ -108,7 +108,7 @@ def collect(cfg: Config, args: argparse.Namespace, conn, grader: Grader | None):
                 summary.skipped["already graded"] = before - len(gradeable)
 
         for email in gradeable:
-            findings = checks.run_all(email)
+            findings = checks.run_all(email, set(cfg.disabled_rules))
             if grader is None:
                 judgement = Judgement(error="model skipped (--no-model)")
             else:
@@ -130,8 +130,12 @@ def deliver(cfg: Config, args, summaries, errors, conn) -> None:
     today = date.today()
     previous = {s.email: store.previous_average(conn, s.email) for s in summaries}
 
-    manager_body = report.manager_html(summaries, today, previous, errors, cfg.shadow_mode)
-    manager_plain = report.manager_text(summaries, today, cfg.shadow_mode)
+    manager_body = report.manager_html(
+        summaries, today, previous, errors, cfg.shadow_mode, cfg.disabled_rules
+    )
+    manager_plain = report.manager_text(
+        summaries, today, cfg.shadow_mode, cfg.disabled_rules
+    )
     subject = cfg.report_subject_manager.format(date=f"{today:%d %b %Y}")
 
     if args.dry_run:

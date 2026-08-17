@@ -669,10 +669,51 @@ ALL_CHECKS = (
     check_compliance,
 )
 
+# Every code a rule can emit. Its job is to catch a typo in the settings: a
+# disabled_rules entry that matches nothing would otherwise switch off nothing
+# at all, silently, and the first anyone would know is a score that never
+# changed. test_checks.py walks the source and fails if a rule is missing here.
+RULE_CODES = frozenset({
+    "body.exclamation",
+    "body.false_urgency",
+    "body.no_ask",
+    "body.no_greeting",
+    "body.punctuation_run",
+    "body.shouting",
+    "body.spam_phrase",
+    "body.too_long",
+    "body.too_short",
+    "compliance.false_prior_contact",
+    "compliance.no_opt_out",
+    "compliance.no_postal_address",
+    "hygiene.attachment",
+    "hygiene.merge_tag",
+    "hygiene.multiple_recipients",
+    "hygiene.no_plain_text",
+    "hygiene.placeholder",
+    "links.image_heavy",
+    "links.insecure",
+    "links.shortener",
+    "links.too_many",
+    "subject.exclamation",
+    "subject.fake_reply",
+    "subject.missing",
+    "subject.money",
+    "subject.shouting",
+    "subject.spam_phrase",
+    "subject.too_long",
+    "subject.too_short",
+})
 
-def run_all(email: Email) -> list[Finding]:
+
+def run_all(email: Email, disabled: set[str] | None = None) -> list[Finding]:
     """Every rule, in a stable order, with one broken rule unable to sink the
-    rest."""
+    rest.
+
+    `disabled` drops findings the company has decided not to be measured on.
+    They are dropped after the rule runs rather than by skipping the check, so
+    turning one rule off cannot change what a sibling rule sees.
+    """
     findings: list[Finding] = []
     for check in ALL_CHECKS:
         try:
@@ -686,6 +727,13 @@ def run_all(email: Email) -> list[Finding]:
                     f"{type(exc).__name__}: {exc}",
                 )
             )
+    if disabled:
+        # internal.* is a bug report, not a rule, so the settings cannot
+        # silence it -- a broken check has to stay visible.
+        findings = [
+            f for f in findings
+            if f.id.startswith("internal.") or f.id not in disabled
+        ]
     return findings
 
 

@@ -104,6 +104,14 @@ class Config:
     report_subject_manager: str = "Outbound email report - {date}"
     report_subject_producer: str = "Your outbound email report - {date}"
 
+    # --- Scoring ---
+    # Rule codes the company has decided not to be measured on. Findings for
+    # these are dropped before scoring, and every report says which ones are
+    # off -- a rule that is silently absent looks identical to a rule that is
+    # passing, and someone reading a clean report a year from now would have no
+    # way to tell the difference.
+    disabled_rules: list[str] = field(default_factory=list)
+
     # --- Housekeeping ---
     lookback_days: int = 1
     max_emails_per_producer: int = 200
@@ -209,6 +217,11 @@ def load(path: Path | None = None, strict: bool = True) -> Config:
     ]
     cfg.min_body_chars = int(scope.get("min_body_chars", cfg.min_body_chars))
 
+    scoring = raw.get("scoring", {}) or {}
+    cfg.disabled_rules = [
+        r.strip().lower() for r in _as_list(scoring.get("disabled_rules"))
+    ]
+
     reporting = raw.get("reporting", {}) or {}
     cfg.manager_email = str(reporting.get("manager_email", "")).strip()
     # In oauth mode the only address that can genuinely send is the one that was
@@ -288,6 +301,14 @@ def _validate(cfg: Config) -> None:
         problems.append("no active producers listed")
     if not cfg.manager_email:
         problems.append("reporting.manager_email is not set")
+    # A misspelt code disables nothing while looking like it disabled
+    # something, so it has to be an error rather than a shrug.
+    from .checks import RULE_CODES
+    for code in cfg.disabled_rules:
+        if code not in RULE_CODES:
+            near = sorted(c for c in RULE_CODES if c.split(".")[0] == code.split(".")[0])
+            hint = f". Rules in that group: {', '.join(near)}" if near else ""
+            problems.append(f"scoring.disabled_rules: no rule called {code!r}{hint}")
     if problems:
         raise ConfigError(
             "config.yaml needs attention:\n  - " + "\n  - ".join(problems)

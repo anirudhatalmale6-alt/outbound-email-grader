@@ -224,6 +224,47 @@ def test_missing_token_message_names_the_script() -> None:
         check("token: missing raises", True)  # libraries absent, fine
 
 
+def test_disabled_rules_are_validated() -> None:
+    """A misspelt code disables nothing while looking like it disabled
+    something. That has to be an error, not a shrug."""
+    body = BASE.format(auth="oauth", mode="archive") + """
+scoring:
+  disabled_rules:
+    - compliance.no_opt_out
+    - compliance.no_postal_address
+"""
+    path = write_config(body)
+    try:
+        cfg = config_module.load(path, strict=False)
+        check("valid codes are read",
+              cfg.disabled_rules == ["compliance.no_opt_out",
+                                     "compliance.no_postal_address"],
+              str(cfg.disabled_rules))
+    finally:
+        path.unlink(missing_ok=True)
+
+    typo = BASE.format(auth="oauth", mode="archive") + """
+scoring:
+  disabled_rules:
+    - compliance.no_optout
+"""
+    path = write_config(typo)
+    try:
+        config_module.load(path, strict=True)
+        check("a misspelt rule code is rejected", False, "no error raised")
+    except ConfigError as exc:
+        message = str(exc)
+        check("a misspelt rule code is rejected", "no rule called" in message)
+        check("the error lists the real codes in that group",
+              "compliance.no_opt_out" in message, message)
+    except Exception as exc:
+        check("a misspelt rule code is rejected", False, repr(exc))
+    finally:
+        path.unlink(missing_ok=True)
+
+    check("nothing is disabled by default", Config().disabled_rules == [])
+
+
 def main() -> int:
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

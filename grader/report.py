@@ -66,6 +66,7 @@ def manager_html(
     previous: dict[str, int | None],
     errors: list[str],
     shadow: bool,
+    disabled: list[str] | None = None,
 ) -> str:
     ranked = sorted(summaries, key=lambda s: (-s.average, s.name or s.email))
     total_graded = sum(s.graded_count for s in summaries)
@@ -149,6 +150,20 @@ def manager_html(
             "the scores look right to you.</span></div>"
         )
 
+    # A switched-off rule and a rule nobody is failing produce the same clean
+    # report. Saying so is the only thing that tells them apart later.
+    disabled_note = ""
+    if disabled:
+        items = "".join(f"<li>{_e(c)}</li>" for c in sorted(disabled))
+        disabled_note = (
+            f'<div style="{CARD};background:#fff8e6;border-color:#f0d9a0">'
+            "<strong>Checks switched off</strong><br>"
+            f'<span style="{MUTED}">These are not being measured, so nothing '
+            "below reflects them. A clean score here does not mean these "
+            "passed &mdash; it means they were not looked at.</span>"
+            f'<ul style="margin:8px 0 0;padding-left:20px;{MUTED}">{items}</ul></div>'
+        )
+
     error_note = ""
     if errors:
         items = "".join(f"<li>{_e(e)}</li>" for e in errors[:10])
@@ -163,6 +178,7 @@ def manager_html(
 <div style="{MUTED}">{when:%A %d %B %Y}</div>
 
 {shadow_note}
+{disabled_note}
 
 <div style="{CARD}">
 <span style="font-size:15px">
@@ -204,11 +220,19 @@ and automated messages. Those are counted, not scored.
 </div>"""
 
 
-def manager_text(summaries: list[ProducerSummary], when: date, shadow: bool) -> str:
+def manager_text(
+    summaries: list[ProducerSummary],
+    when: date,
+    shadow: bool,
+    disabled: list[str] | None = None,
+) -> str:
     ranked = sorted(summaries, key=lambda s: (-s.average, s.name or s.email))
     lines = [f"Outbound email report - {when:%d %B %Y}", ""]
     if shadow:
         lines += ["SHADOW MODE: producers have not been emailed.", ""]
+    if disabled:
+        lines += ["CHECKS SWITCHED OFF (not measured, not passing): "
+                  + ", ".join(sorted(disabled)), ""]
     for s in ranked:
         if not s.graded_count:
             lines.append(f"  {s.name or s.email}: no outreach emails today")

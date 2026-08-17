@@ -285,6 +285,63 @@ def test_opt_out_wordings() -> None:
           "compliance.no_opt_out" in ids(checks.check_compliance(silent)))
 
 
+def test_rule_codes_registry_is_complete() -> None:
+    """RULE_CODES is what validates the settings, so a rule missing from it
+    would make a legitimate disabled_rules entry look like a typo."""
+    import ast
+
+    source = (Path(__file__).resolve().parent.parent
+              / "grader" / "checks.py").read_text(encoding="utf-8")
+    emitted: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "Finding"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)):
+            emitted.add(node.args[0].value)
+    emitted = {c for c in emitted if not c.startswith("internal.")}
+
+    missing = sorted(emitted - set(checks.RULE_CODES))
+    check("every rule is in RULE_CODES", not missing, ", ".join(missing))
+    stale = sorted(set(checks.RULE_CODES) - emitted)
+    check("RULE_CODES has no rules that no longer exist", not stale,
+          ", ".join(stale))
+
+
+def test_disabled_rules_drop_findings() -> None:
+    spammy = Email(
+        subject="RE: ACT NOW!!! FREE MONEY",
+        body_text="Hi there, click here now. Limited time offer!!!",
+    )
+    everything = ids(checks.run_all(spammy))
+    check("the sample email does fail on opt-out",
+          "compliance.no_opt_out" in everything)
+
+    without = checks.run_all(spammy, {"compliance.no_opt_out"})
+    check("a disabled rule produces no finding",
+          "compliance.no_opt_out" not in ids(without))
+    check("disabling one rule leaves the others alone",
+          ids(without) == everything - {"compliance.no_opt_out"})
+
+    scored = checks.mechanical_score(without)
+    check("dropping a high finding raises the score",
+          scored > checks.mechanical_score(checks.run_all(spammy)))
+
+    check("an empty disabled set changes nothing",
+          ids(checks.run_all(spammy, set())) == everything)
+
+
+def test_disabled_rules_cannot_silence_a_broken_check() -> None:
+    """A bug in a check has to stay visible, or config could hide it."""
+    broken = Finding("internal.check_subject", "hygiene", "low", "boom", "bug")
+    kept = [f for f in [broken]
+            if f.id.startswith("internal.") or f.id not in {"internal.check_subject"}]
+    check("internal findings survive being named in disabled_rules",
+          [f.id for f in kept] == ["internal.check_subject"])
+
+
 def main() -> int:
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

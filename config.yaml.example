@@ -105,6 +105,25 @@ scope:
   min_body_chars: 40
 
 # ---------------------------------------------------------------------
+#  Scoring
+# ---------------------------------------------------------------------
+scoring:
+  # Rules you have decided not to be measured on. Findings for these are
+  # dropped before scoring, and every report states which ones are off --
+  # otherwise a switched-off rule and a rule nobody is failing look identical.
+  #
+  # Think hard before disabling either of these two. They are the two hard
+  # requirements in CAN-SPAM for US commercial email, the penalty is assessed
+  # per message, and neither needs an ugly footer to satisfy:
+  #   compliance.no_opt_out         "if you'd rather not hear from me, just
+  #                                  reply and say so" is enough
+  #   compliance.no_postal_address  a PO box in the signature is enough
+  #
+  # A code that does not exist is an error, not a shrug -- a typo here would
+  # otherwise disable nothing while looking like it disabled something.
+  disabled_rules: []
+
+# ---------------------------------------------------------------------
 #  Reporting
 # ---------------------------------------------------------------------
 reporting:
