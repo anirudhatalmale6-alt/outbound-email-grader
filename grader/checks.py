@@ -70,6 +70,11 @@ class Email:
     # to someone who already replied is a conversation, not chasing silence, and
     # must not be graded as cold outreach.
     prospect_replied: bool = False
+    # True where the company phones the prospect before emailing. It changes
+    # what is true about the message rather than what is good about it: an
+    # email that says "following up on our call" is being accurate, and must
+    # not be flagged for claiming contact that did happen.
+    after_call: bool = False
 
     @property
     def is_follow_up(self) -> bool:
@@ -645,9 +650,12 @@ def check_compliance(email: Email) -> list[Finding]:
             )
         )
 
-    if re.search(r"\b(you (?:requested|asked|signed up|opted in)|as you requested"
-                 r"|per your request|following up on your (?:enquiry|inquiry|request))\b",
-                 body, re.I):
+    # Where the prospect really was phoned first, referring to that is honest,
+    # and flagging it would be accusing somebody of a lie they did not tell.
+    if not email.after_call and re.search(
+            r"\b(you (?:requested|asked|signed up|opted in)|as you requested"
+            r"|per your request|following up on your (?:enquiry|inquiry|request))\b",
+            body, re.I):
         out.append(
             Finding(
                 "compliance.false_prior_contact", "compliance", "medium",

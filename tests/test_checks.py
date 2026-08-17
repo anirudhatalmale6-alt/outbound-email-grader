@@ -342,6 +342,39 @@ def test_disabled_rules_cannot_silence_a_broken_check() -> None:
           [f.id for f in kept] == ["internal.check_subject"])
 
 
+def test_after_call_stops_the_false_prior_contact_flag() -> None:
+    """He calls prospects before emailing. "Following up on our call" is then
+    true, and flagging it accuses a producer of a lie they did not tell."""
+    claim = Email(
+        subject="Following up",
+        body_text=("Hi Dana,\n\nGreat speaking earlier. Following up on your "
+                   "request, here are the segment rates.\n\nIf you would rather "
+                   "not hear from me, just reply and say so.\n\n"
+                   "All Access PTV, 1 Main St, Tampa, FL 33602"),
+    )
+    check("cold: a claim of prior contact is flagged",
+          "compliance.false_prior_contact" in ids(checks.check_compliance(claim)))
+
+    claim.after_call = True
+    after = ids(checks.check_compliance(claim))
+    check("after a call: the same wording is not flagged",
+          "compliance.false_prior_contact" not in after)
+
+    # The two rules that carry real money must not be softened by it.
+    naked = Email(subject="Rates", body_text="Hi Dana, here are the rates.")
+    naked.after_call = True
+    still = ids(checks.check_compliance(naked))
+    check("after_call does not excuse a missing opt-out",
+          "compliance.no_opt_out" in still)
+    check("after_call does not excuse a missing postal address",
+          "compliance.no_postal_address" in still)
+
+
+def test_after_call_defaults_off() -> None:
+    check("after_call is off unless the settings say otherwise",
+          Email().after_call is False)
+
+
 def main() -> int:
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

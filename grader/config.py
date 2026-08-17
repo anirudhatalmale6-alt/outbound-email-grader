@@ -86,6 +86,10 @@ class Config:
     # Once the prospect has written back it is a conversation, not outreach,
     # and grading it against a cold-email standard is meaningless.
     grade_after_reply: bool = False
+    # True where producers phone the prospect before emailing. The email is
+    # then a post-call follow-up rather than a true cold email, and judging it
+    # as a cold email marks it down for not doing work the call already did.
+    preceded_by_call: bool = False
     internal_domains: list[str] = field(default_factory=list)
     exclude_recipients: list[str] = field(default_factory=list)
     min_body_chars: int = 40
@@ -210,6 +214,9 @@ def load(path: Path | None = None, strict: bool = True) -> Config:
     cfg.max_touch = int(scope.get("max_touch", cfg.max_touch))
     cfg.grade_after_reply = bool(
         scope.get("grade_after_reply", cfg.grade_after_reply)
+    )
+    cfg.preceded_by_call = bool(
+        scope.get("preceded_by_call", cfg.preceded_by_call)
     )
     cfg.internal_domains = _as_list(scope.get("internal_domains"))
     cfg.exclude_recipients = [

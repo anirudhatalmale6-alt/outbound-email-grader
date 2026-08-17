@@ -108,6 +108,10 @@ def collect(cfg: Config, args: argparse.Namespace, conn, grader: Grader | None):
                 summary.skipped["already graded"] = before - len(gradeable)
 
         for email in gradeable:
+            # Set here rather than at parse time: it is a fact about how the
+            # company works, not about the message, and both the rules and the
+            # model need it.
+            email.after_call = cfg.preceded_by_call
             findings = checks.run_all(email, set(cfg.disabled_rules))
             if grader is None:
                 judgement = Judgement(error="model skipped (--no-model)")

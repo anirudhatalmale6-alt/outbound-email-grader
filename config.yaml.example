@@ -104,6 +104,15 @@ scope:
   # Anything shorter than this many characters is not worth grading.
   min_body_chars: 40
 
+  # Set this to true if your producers PHONE the prospect before emailing.
+  # The email is then a post-call follow-up, not a true cold email, and two
+  # things change:
+  #   - "following up on our call" stops being flagged as a false claim of
+  #     prior contact, because the contact really happened
+  #   - the writing half is told about the call, so it stops marking people
+  #     down for not re-introducing a company the prospect already spoke to
+  preceded_by_call: false
+
 # ---------------------------------------------------------------------
 #  Scoring
 # ---------------------------------------------------------------------

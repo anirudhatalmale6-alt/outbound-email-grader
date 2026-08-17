@@ -149,6 +149,19 @@ def _render(email: Email) -> str:
     # introducing the company, which is exactly what a follow-up should not do.
     if email.touch <= 1:
         position = "This is the FIRST contact with this person."
+        if email.after_call:
+            # Otherwise the model marks it down for skipping work the call
+            # already did, and every producer loses the same marks every day
+            # for following the company's own process.
+            position = (
+                "This is the FIRST EMAIL, but NOT the first contact: the "
+                "producer already spoke to this person on the phone. Judge it "
+                "as a post-call email. It is right for it to be short, to "
+                "assume the company has already been introduced, and to refer "
+                "back to the conversation. Do not mark it down for lacking a "
+                "cold opening, for not explaining who the company is, or for "
+                "referring to prior contact -- that contact was real."
+            )
     else:
         position = (
             f"This is FOLLOW-UP number {email.touch - 1} (touch {email.touch}). "
